@@ -19,7 +19,8 @@ import {
   exportToExcel
 } from '../api';
 import type { Company, Material, InvoiceInput } from '../api';
-import { SearchableSelect, SelectOption } from '../components/SearchableSelect';
+import { SearchableSelect } from '../components/SearchableSelect';
+import type { SelectOption } from '../components/SearchableSelect';
 
 interface InvoiceScreenProps {
   showToast: (msg: string, type: 'success' | 'error' | 'warning') => void;
