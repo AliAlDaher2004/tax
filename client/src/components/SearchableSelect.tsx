@@ -66,7 +66,7 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
         style={{
           display: 'flex',
           justifyContent: 'space-between',
-          align-items: 'center',
+          alignItems: 'center',
           textAlign: 'right',
           width: '100%',
           cursor: disabled ? 'not-allowed' : 'pointer'
