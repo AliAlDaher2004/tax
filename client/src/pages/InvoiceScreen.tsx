@@ -4,13 +4,7 @@ import {
   Plus,
   Trash2,
   Edit2,
-  Building2,
-  Package,
-  Calendar,
-  DollarSign,
   AlertCircle,
-  Hash,
-  X,
   Database
 } from 'lucide-react';
 import {
@@ -23,7 +17,7 @@ import { SearchableSelect } from '../components/SearchableSelect';
 import type { SelectOption } from '../components/SearchableSelect';
 
 interface InvoiceScreenProps {
-  showToast: (msg: string, type: 'success' | 'error' | 'warning') => void;
+  showToast: (msg: string, type: 'success' | 'error' | 'warning' | 'info') => void;
   navigateToAdmin: () => void;
 }
 

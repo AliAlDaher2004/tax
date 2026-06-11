@@ -6,8 +6,7 @@ import {
   Package,
   Edit2,
   Trash2,
-  X,
-  AlertCircle
+  X
 } from 'lucide-react';
 import {
   getCompanies,
@@ -22,7 +21,7 @@ import {
 import type { Company, Material } from '../api';
 
 interface AdminScreenProps {
-  showToast: (msg: string, type: 'success' | 'error' | 'warning') => void;
+  showToast: (msg: string, type: 'success' | 'error' | 'warning' | 'info') => void;
 }
 
 export const AdminScreen: React.FC<AdminScreenProps> = ({ showToast }) => {
@@ -257,7 +256,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({ showToast }) => {
                         <tr>
                           <th style={{ width: '50%' }}>اسم الشركة (بالعربية)</th>
                           <th style={{ width: '35%' }}>الرقم الضريبي</th>
-                          <th style={{ width: '15%', textAlignment: 'left' }}>الخيارات</th>
+                          <th style={{ width: '15%', textAlign: 'left' }}>الخيارات</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -313,7 +312,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({ showToast }) => {
                           <th style={{ width: '40%' }}>اسم المادة (بالعربية)</th>
                           <th style={{ width: '25%' }}>رقم الإعفاء</th>
                           <th style={{ width: '20%' }}>رمز البند الرئيسي (Main Item Code)</th>
-                          <th style={{ width: '15%', textAlignment: 'left' }}>الخيارات</th>
+                          <th style={{ width: '15%', textAlign: 'left' }}>الخيارات</th>
                         </tr>
                       </thead>
                       <tbody>
