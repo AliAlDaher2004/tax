@@ -231,14 +231,8 @@ router.post('/export', async (req: Request, res: Response) => {
 
     // Style the header row
     const headerRow = worksheet.getRow(1);
-    headerRow.font = { name: 'Cairo', family: 4, size: 11, bold: true, color: { argb: 'FFFFFF' } };
-    headerRow.fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: '2E5BFF' } // Sleek indigo-ish header background
-    };
+    headerRow.font = { name: 'Arial', size: 11, bold: true };
     headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
-    headerRow.height = 28;
 
     // Add rows
     invoices.forEach((inv) => {
