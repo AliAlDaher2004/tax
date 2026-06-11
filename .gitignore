@@ -1,0 +1,24 @@
+# Dependency directories
+node_modules/
+client/node_modules/
+server/node_modules/
+
+# Production build outputs
+dist/
+client/dist/
+server/dist/
+
+# Configuration files with private API tokens
+.env
+server/.env
+client/.env
+
+# Local logs
+*.log
+logs/
+
+# Editor and OS settings
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
