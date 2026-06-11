@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: tax-exemption-backend
+    env: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: SUPABASE_URL
+        sync: false # Render will prompt you to type this value
+      - key: SUPABASE_ANON_KEY
+        sync: false # Render will prompt you to type this value
+      - key: PORT
+        value: 5000
