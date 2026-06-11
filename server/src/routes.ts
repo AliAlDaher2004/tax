@@ -203,6 +203,7 @@ router.post('/export', async (req: Request, res: Response) => {
 
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('بيانات الإعفاءات الضريبية');
+    worksheet.views = [{ showGridLines: true }];
 
     // Define column mapping and order.
     // The columns MUST match the exact order and exact Arabic names:
@@ -277,14 +278,7 @@ router.post('/export', async (req: Request, res: Response) => {
             right: { style: 'thin', color: { argb: 'E2E8F0' } }
           };
 
-          // Light gray fill for alternating rows
-          if (rowNumber % 2 === 0) {
-            cell.fill = {
-              type: 'pattern',
-              pattern: 'solid',
-              fgColor: { argb: 'F8FAFC' }
-            };
-          }
+          // No alternating fill color to match original template
         }
       });
     });
