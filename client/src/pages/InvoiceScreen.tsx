@@ -14,13 +14,11 @@ import {
   Database
 } from 'lucide-react';
 import {
-  Company,
-  Material,
-  InvoiceInput,
   getCompanies,
   getMaterials,
   exportToExcel
 } from '../api';
+import type { Company, Material, InvoiceInput } from '../api';
 import { SearchableSelect, SelectOption } from '../components/SearchableSelect';
 
 interface InvoiceScreenProps {

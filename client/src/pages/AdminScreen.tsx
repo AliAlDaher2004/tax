@@ -10,8 +10,6 @@ import {
   AlertCircle
 } from 'lucide-react';
 import {
-  Company,
-  Material,
   getCompanies,
   createCompany,
   updateCompany,
@@ -21,6 +19,7 @@ import {
   updateMaterial,
   deleteMaterial
 } from '../api';
+import type { Company, Material } from '../api';
 
 interface AdminScreenProps {
   showToast: (msg: string, type: 'success' | 'error' | 'warning') => void;
