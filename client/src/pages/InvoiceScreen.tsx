@@ -34,6 +34,7 @@ export const InvoiceScreen: React.FC<InvoiceScreenProps> = ({ showToast, navigat
   // Form Fields
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
   const [selectedMaterialId, setSelectedMaterialId] = useState<string>('');
+  const [selectedExemptionKey, setSelectedExemptionKey] = useState<string>('');
   const [invoiceNumber, setInvoiceNumber] = useState<string>('');
   const [invoiceDate, setInvoiceDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [quantity, setQuantity] = useState<string>('');
@@ -70,8 +71,17 @@ export const InvoiceScreen: React.FC<InvoiceScreenProps> = ({ showToast, navigat
       if (comp) {
         setTaxNumber(comp.tax_number);
       }
+      
+      // Clear material selection if it doesn't belong to the newly selected company
+      if (selectedMaterialId) {
+        const mat = materials.find(m => m.id === selectedMaterialId);
+        if (mat && (!mat.company_ids || !mat.company_ids.includes(selectedCompanyId))) {
+          setSelectedMaterialId('');
+        }
+      }
     } else {
       setTaxNumber('');
+      setSelectedMaterialId('');
     }
   }, [selectedCompanyId, companies]);
 
@@ -80,14 +90,46 @@ export const InvoiceScreen: React.FC<InvoiceScreenProps> = ({ showToast, navigat
     if (selectedMaterialId) {
       const mat = materials.find((m) => m.id === selectedMaterialId);
       if (mat) {
-        setExemptionNumber(mat.exemption_number);
-        setMainItemCode(mat.main_item_code);
+        if (mat.exemptions && mat.exemptions.length === 1) {
+          setExemptionNumber(mat.exemptions[0].exemption_number);
+          setMainItemCode(mat.exemptions[0].main_item_code);
+          setSelectedExemptionKey(`${mat.exemptions[0].exemption_number}_${mat.exemptions[0].main_item_code}`);
+        } else {
+          // If editing or existing selection is still valid for this material, preserve it
+          const isValid = mat.exemptions && mat.exemptions.some(e => `${e.exemption_number}_${e.main_item_code}` === selectedExemptionKey);
+          if (!isValid) {
+            setExemptionNumber('');
+            setMainItemCode('');
+            setSelectedExemptionKey('');
+          }
+        }
       }
     } else {
       setExemptionNumber('');
       setMainItemCode('');
+      setSelectedExemptionKey('');
     }
   }, [selectedMaterialId, materials]);
+
+  // Triggered when selected exemption changes (autofills paired main item code)
+  useEffect(() => {
+    if (selectedMaterialId && selectedExemptionKey) {
+      const mat = materials.find((m) => m.id === selectedMaterialId);
+      if (mat && mat.exemptions) {
+        const [exNum, itemCode] = selectedExemptionKey.split('_');
+        const ex = mat.exemptions.find(e => e.exemption_number === exNum && e.main_item_code === itemCode);
+        if (ex) {
+          setExemptionNumber(ex.exemption_number);
+          setMainItemCode(ex.main_item_code);
+        }
+      }
+    }
+  }, [selectedExemptionKey, selectedMaterialId, materials]);
+
+  // Filter materials based on selectedCompanyId
+  const filteredMaterialsList = selectedCompanyId
+    ? materials.filter(m => m.company_ids && m.company_ids.includes(selectedCompanyId))
+    : [];
 
   // Map database elements to searchable select options
   const companyOptions: SelectOption[] = companies.map((c) => ({
@@ -95,7 +137,7 @@ export const InvoiceScreen: React.FC<InvoiceScreenProps> = ({ showToast, navigat
     label: c.name_ar
   }));
 
-  const materialOptions: SelectOption[] = materials.map((m) => ({
+  const materialOptions: SelectOption[] = filteredMaterialsList.map((m) => ({
     id: m.id!,
     label: m.name_ar
   }));
@@ -111,6 +153,10 @@ export const InvoiceScreen: React.FC<InvoiceScreenProps> = ({ showToast, navigat
     }
     if (!selectedMaterialId) {
       showToast('يرجى اختيار المادة/الصنف أولاً', 'warning');
+      return;
+    }
+    if (!exemptionNumber.trim() || !mainItemCode.trim()) {
+      showToast('يرجى تحديد رقم الإعفاء المطلوب لهذا الصنف', 'warning');
       return;
     }
     if (!invoiceNumber.trim()) {
@@ -170,6 +216,7 @@ export const InvoiceScreen: React.FC<InvoiceScreenProps> = ({ showToast, navigat
     setSubtotalAmount('');
     setTotalAmount('');
     setSelectedMaterialId('');
+    setSelectedExemptionKey('');
   };
 
   // Edit Row
@@ -177,6 +224,7 @@ export const InvoiceScreen: React.FC<InvoiceScreenProps> = ({ showToast, navigat
     setEditingId(inv.id!);
     setSelectedCompanyId(inv.companyId || '');
     setSelectedMaterialId(inv.materialId || '');
+    setSelectedExemptionKey(inv.exemptionNumber && inv.mainItemCode ? `${inv.exemptionNumber}_${inv.mainItemCode}` : '');
     setInvoiceNumber(inv.invoiceNumber);
     setInvoiceDate(inv.invoiceDate);
     setQuantity(inv.quantity.toString());
@@ -199,6 +247,7 @@ export const InvoiceScreen: React.FC<InvoiceScreenProps> = ({ showToast, navigat
     setEditingId(null);
     setSelectedCompanyId('');
     setSelectedMaterialId('');
+    setSelectedExemptionKey('');
     setInvoiceNumber('');
     setInvoiceDate(new Date().toISOString().split('T')[0]);
     setQuantity('');
@@ -284,6 +333,33 @@ export const InvoiceScreen: React.FC<InvoiceScreenProps> = ({ showToast, navigat
                   placeholder="اختر المادة..."
                 />
               </div>
+
+              {/* Exemption Number Selection Dropdown (Only shown if material has multiple exemptions) */}
+              {selectedMaterialId && (() => {
+                const mat = materials.find(m => m.id === selectedMaterialId);
+                if (mat && mat.exemptions && mat.exemptions.length > 1) {
+                  return (
+                    <div className="form-group" style={{ animation: 'fadeIn 0.3s ease' }}>
+                      <label className="form-label" style={{ color: 'var(--primary)', fontWeight: 'bold' }}>رقم الإعفاء المطلوب *</label>
+                      <select
+                        className="form-input"
+                        value={selectedExemptionKey}
+                        onChange={(e) => setSelectedExemptionKey(e.target.value)}
+                        required
+                        style={{ borderColor: 'var(--primary)' }}
+                      >
+                        <option value="">-- اختر رقم الإعفاء --</option>
+                        {mat.exemptions.map((ex, idx) => (
+                          <option key={idx} value={`${ex.exemption_number}_${ex.main_item_code}`}>
+                            {ex.exemption_number} (رمز البند: {ex.main_item_code})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
 
               {/* Exemption Number (Auto filled & formatted in UI description) */}
               <div className="form-group">

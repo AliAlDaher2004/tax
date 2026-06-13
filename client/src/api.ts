@@ -7,11 +7,17 @@ export interface Company {
   created_at?: string;
 }
 
+export interface MaterialExemption {
+  id?: string;
+  exemption_number: string;
+  main_item_code: string;
+}
+
 export interface Material {
   id?: string;
   name_ar: string;
-  exemption_number: string;
-  main_item_code: string;
+  exemptions: MaterialExemption[];
+  company_ids: string[];
   created_at?: string;
 }
 
@@ -168,3 +174,78 @@ export async function exportToExcel(invoices: InvoiceInput[]): Promise<void> {
   link.parentNode?.removeChild(link);
   window.URL.revokeObjectURL(url);
 }
+
+// -------------------------------------------------------------
+// Download Templates API
+// -------------------------------------------------------------
+export async function downloadCompaniesTemplate(): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/companies/template`);
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || 'Failed to download companies template');
+  }
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', 'companies_template.xlsx');
+  document.body.appendChild(link);
+  link.click();
+  link.parentNode?.removeChild(link);
+  window.URL.revokeObjectURL(url);
+}
+
+export async function downloadMaterialsTemplate(): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/materials/template`);
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || 'Failed to download materials template');
+  }
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', 'materials_template.xlsx');
+  document.body.appendChild(link);
+  link.click();
+  link.parentNode?.removeChild(link);
+  window.URL.revokeObjectURL(url);
+}
+
+// -------------------------------------------------------------
+// Import Excel API
+// -------------------------------------------------------------
+export interface ImportResponse {
+  success: boolean;
+  message: string;
+  warnings?: string[];
+}
+
+export async function importCompaniesExcel(base64File: string): Promise<ImportResponse> {
+  const response = await fetch(`${API_BASE_URL}/companies/import`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ file: base64File })
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || 'Failed to import companies');
+  }
+  return response.json();
+}
+
+export async function importMaterialsExcel(base64File: string): Promise<ImportResponse> {
+  const response = await fetch(`${API_BASE_URL}/materials/import`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ file: base64File })
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || 'Failed to import materials');
+  }
+  return response.json();
+}
+

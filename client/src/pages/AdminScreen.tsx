@@ -6,7 +6,9 @@ import {
   Package,
   Edit2,
   Trash2,
-  X
+  X,
+  Download,
+  UploadCloud
 } from 'lucide-react';
 import {
   getCompanies,
@@ -16,7 +18,11 @@ import {
   getMaterials,
   createMaterial,
   updateMaterial,
-  deleteMaterial
+  deleteMaterial,
+  downloadCompaniesTemplate,
+  downloadMaterialsTemplate,
+  importCompaniesExcel,
+  importMaterialsExcel
 } from '../api';
 import type { Company, Material } from '../api';
 
@@ -29,7 +35,63 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({ showToast }) => {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [importing, setImporting] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
+
+  const handleDownloadTemplate = async () => {
+    try {
+      if (activeTab === 'companies') {
+        await downloadCompaniesTemplate();
+        showToast('تم تحميل نموذج استيراد الشركات بنجاح', 'success');
+      } else {
+        await downloadMaterialsTemplate();
+        showToast('تم تحميل نموذج استيراد الأصناف بنجاح', 'success');
+      }
+    } catch (err: any) {
+      showToast('فشل تحميل النموذج: ' + err.message, 'error');
+    }
+  };
+
+  const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const inputElement = e.target;
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const result = event.target?.result as string;
+      if (!result) return;
+      
+      const base64Data = result.split(',')[1];
+      setImporting(true);
+      try {
+        if (activeTab === 'companies') {
+          const res = await importCompaniesExcel(base64Data);
+          showToast(res.message, 'success');
+          if (res.warnings && res.warnings.length > 0) {
+            showToast(`تنبيه: تم تخطي بعض السطور لعدم اكتمال بياناتها`, 'warning');
+          }
+        } else {
+          const res = await importMaterialsExcel(base64Data);
+          showToast(res.message, 'success');
+          if (res.warnings && res.warnings.length > 0) {
+            showToast(`تنبيه: تم تخطي بعض السطور لعدم اكتمال بياناتها`, 'warning');
+          }
+        }
+        loadData();
+      } catch (err: any) {
+        showToast('حدث خطأ أثناء الاستيراد: ' + err.message, 'error');
+      } finally {
+        setImporting(false);
+        inputElement.value = '';
+      }
+    };
+    reader.onerror = () => {
+      showToast('فشل قراءة الملف المختار', 'error');
+      inputElement.value = '';
+    };
+    reader.readAsDataURL(file);
+  };
 
   // Modal states
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
@@ -41,8 +103,10 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({ showToast }) => {
   const [taxNumber, setTaxNumber] = useState<string>('');
 
   const [materialName, setMaterialName] = useState<string>('');
-  const [exemptionNumber, setExemptionNumber] = useState<string>('');
-  const [mainItemCode, setMainItemCode] = useState<string>('');
+  const [exemptions, setExemptions] = useState<{ exemption_number: string; main_item_code: string }[]>([
+    { exemption_number: '', main_item_code: '' }
+  ]);
+  const [selectedCompanyIds, setSelectedCompanyIds] = useState<string[]>([]);
 
   // Fetch data on load and when tab changes
   useEffect(() => {
@@ -56,8 +120,10 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({ showToast }) => {
         const data = await getCompanies();
         setCompanies(data);
       } else {
-        const data = await getMaterials();
-        setMaterials(data);
+        // Load both materials and companies to associate them in checkboxes
+        const [matsData, compsData] = await Promise.all([getMaterials(), getCompanies()]);
+        setMaterials(matsData);
+        setCompanies(compsData);
       }
     } catch (err: any) {
       showToast('حدث خطأ أثناء تحميل البيانات: ' + err.message, 'error');
@@ -71,8 +137,8 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({ showToast }) => {
     setCompanyName('');
     setTaxNumber('');
     setMaterialName('');
-    setExemptionNumber('');
-    setMainItemCode('');
+    setExemptions([{ exemption_number: '', main_item_code: '' }]);
+    setSelectedCompanyIds([]);
     setEditingId('');
   };
 
@@ -90,8 +156,11 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({ showToast }) => {
       setTaxNumber(item.tax_number);
     } else {
       setMaterialName(item.name_ar);
-      setExemptionNumber(item.exemption_number);
-      setMainItemCode(item.main_item_code);
+      setExemptions(item.exemptions && item.exemptions.length > 0
+        ? item.exemptions.map((ex: any) => ({ exemption_number: ex.exemption_number, main_item_code: ex.main_item_code }))
+        : [{ exemption_number: '', main_item_code: '' }]
+      );
+      setSelectedCompanyIds(item.company_ids || []);
     }
     setIsModalOpen(true);
   };
@@ -119,15 +188,22 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({ showToast }) => {
           showToast('تم تحديث بيانات الشركة بنجاح', 'success');
         }
       } else {
-        if (!materialName.trim() || !exemptionNumber.trim() || !mainItemCode.trim()) {
-          showToast('يرجى ملء جميع الحقول المطلوبة للمادة', 'warning');
+        if (!materialName.trim()) {
+          showToast('يرجى إدخال اسم الصنف/المادة', 'warning');
+          return;
+        }
+
+        // Validate that exemptions list has valid non-empty fields
+        const validExemptions = exemptions.filter(ex => ex.exemption_number.trim() && ex.main_item_code.trim());
+        if (validExemptions.length === 0) {
+          showToast('يرجى إضافة إعفاء واحد على الأقل يحتوي على رقم الإعفاء ورمز البند', 'warning');
           return;
         }
 
         const materialPayload: Material = {
           name_ar: materialName.trim(),
-          exemption_number: exemptionNumber.trim(),
-          main_item_code: mainItemCode.trim()
+          exemptions: validExemptions,
+          company_ids: selectedCompanyIds
         };
 
         if (modalMode === 'add') {
@@ -176,8 +252,10 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({ showToast }) => {
   const filteredMaterials = materials.filter(
     (m) =>
       m.name_ar.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      m.exemption_number.includes(searchQuery) ||
-      m.main_item_code.includes(searchQuery)
+      (m.exemptions && m.exemptions.some(ex => 
+        ex.exemption_number.includes(searchQuery) || 
+        ex.main_item_code.includes(searchQuery)
+      ))
   );
 
   return (
@@ -216,8 +294,8 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({ showToast }) => {
       <main style={{ flex: 1 }}>
         <div className="card" style={{ margin: 0, minHeight: '500px' }}>
           {/* Header Action Bar */}
-          <div className="search-header">
-            <div className="search-input-wrapper">
+          <div className="search-header" style={{ flexWrap: 'wrap', gap: '0.75rem' }}>
+            <div className="search-input-wrapper" style={{ flex: 1, minWidth: '250px' }}>
               <input
                 type="text"
                 placeholder={activeTab === 'companies' ? 'ابحث باسم الشركة أو الرقم الضريبي...' : 'ابحث باسم المادة، كود الصنف أو رقم الإعفاء...'}
@@ -228,14 +306,43 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({ showToast }) => {
               <Search className="search-input-icon" size={18} />
             </div>
 
-            <button className="btn btn-primary" onClick={openAddModal}>
-              <Plus size={18} />
-              <span>{activeTab === 'companies' ? 'إضافة شركة' : 'إضافة صنف'}</span>
-            </button>
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <button 
+                type="button"
+                className="btn btn-secondary" 
+                onClick={handleDownloadTemplate}
+                title="تحميل نموذج ملف Excel"
+                disabled={importing}
+              >
+                <Download size={18} />
+                <span>تحميل النموذج</span>
+              </button>
+
+              <label 
+                className={`btn btn-secondary ${importing ? 'disabled' : ''}`} 
+                style={{ margin: 0, display: 'inline-flex', cursor: importing ? 'not-allowed' : 'pointer', opacity: importing ? 0.6 : 1 }} 
+                title="استيراد من ملف Excel"
+              >
+                <UploadCloud size={18} />
+                <span>استيراد من Excel</span>
+                <input 
+                  type="file" 
+                  accept=".xlsx, .xls" 
+                  onChange={handleFileImport} 
+                  style={{ display: 'none' }} 
+                  disabled={importing}
+                />
+              </label>
+
+              <button className="btn btn-primary" onClick={openAddModal} disabled={importing}>
+                <Plus size={18} />
+                <span>{activeTab === 'companies' ? 'إضافة شركة' : 'إضافة صنف'}</span>
+              </button>
+            </div>
           </div>
 
           {/* Loading Indicator */}
-          {loading ? (
+          {loading || importing ? (
             <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '300px', flexDirection: 'column', gap: '1rem' }}>
               <div style={{ width: '2.5rem', height: '2.5rem', border: '3px solid var(--primary-light)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
               <style>{`
@@ -243,7 +350,9 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({ showToast }) => {
                   to { transform: rotate(360deg); }
                 }
               `}</style>
-              <span style={{ color: 'var(--text-muted)' }}>جاري تحميل البيانات الأساسية...</span>
+              <span style={{ color: 'var(--text-muted)' }}>
+                {importing ? 'جاري استيراد ومعالجة ملف Excel...' : 'جاري تحميل البيانات الأساسية...'}
+              </span>
             </div>
           ) : (
             <>
@@ -309,9 +418,9 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({ showToast }) => {
                     <table className="data-table">
                       <thead>
                         <tr>
-                          <th style={{ width: '40%' }}>اسم المادة (بالعربية)</th>
-                          <th style={{ width: '25%' }}>رقم الإعفاء</th>
-                          <th style={{ width: '20%' }}>رمز البند الرئيسي (Main Item Code)</th>
+                          <th style={{ width: '30%' }}>اسم المادة (بالعربية)</th>
+                          <th style={{ width: '35%' }}>أرقام الإعفاء والبنود المرتبطة</th>
+                          <th style={{ width: '20%' }}>الشركات الموردة</th>
                           <th style={{ width: '15%', textAlign: 'left' }}>الخيارات</th>
                         </tr>
                       </thead>
@@ -320,12 +429,29 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({ showToast }) => {
                           <tr key={material.id}>
                             <td style={{ fontWeight: 600 }}>{material.name_ar}</td>
                             <td>
-                              <span style={{ color: 'var(--primary)', fontWeight: 700 }}>
-                                {material.exemption_number}
-                              </span>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+                                {material.exemptions && material.exemptions.length > 0 ? (
+                                  material.exemptions.map((ex, idx) => (
+                                    <span key={idx} className="badge-fixed" style={{ fontSize: '0.8rem', padding: '0.2rem 0.5rem' }}>
+                                      {ex.exemption_number} (بند {ex.main_item_code})
+                                    </span>
+                                  ))
+                                ) : (
+                                  <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>لا توجد إعفاءات مسجلة</span>
+                                )}
+                              </div>
                             </td>
                             <td>
-                              <span className="badge-fixed">{material.main_item_code}</span>
+                              <div style={{ fontSize: '0.85rem', color: 'var(--text-main)', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                                {material.company_ids && material.company_ids.length > 0 ? (
+                                  material.company_ids.map(cid => {
+                                    const comp = companies.find(c => c.id === cid);
+                                    return comp ? <span key={cid}>• {comp.name_ar}</span> : null;
+                                  })
+                                ) : (
+                                  <span style={{ color: 'var(--text-muted)' }}>غير مرتبط بأي شركة</span>
+                                )}
+                              </div>
                             </td>
                             <td>
                               <div className="actions-cell">
@@ -420,27 +546,99 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({ showToast }) => {
                         required
                       />
                     </div>
-                    <div className="form-group">
-                      <label className="form-label">رقم الإعفاء الضريبي (من مصلحة الضرائب) *</label>
-                      <input
-                        type="text"
-                        className="form-input"
-                        placeholder="مثال: 1254"
-                        value={exemptionNumber}
-                        onChange={(e) => setExemptionNumber(e.target.value)}
-                        required
-                      />
+
+                    <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                      <label className="form-label">أرقام الإعفاء ورموز البنود الرئيسية المرتبطة *</label>
+                      {exemptions.map((ex, index) => (
+                        <div key={index} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                          <input
+                            type="text"
+                            className="form-input"
+                            placeholder="رقم الإعفاء (مثال: 1254)"
+                            value={ex.exemption_number}
+                            onChange={(e) => {
+                              const newExs = [...exemptions];
+                              newExs[index].exemption_number = e.target.value;
+                              setExemptions(newExs);
+                            }}
+                            required
+                            style={{ flex: 2 }}
+                          />
+                          <input
+                            type="text"
+                            className="form-input"
+                            placeholder="رمز البند (مثال: 73)"
+                            value={ex.main_item_code}
+                            onChange={(e) => {
+                              const newExs = [...exemptions];
+                              newExs[index].main_item_code = e.target.value;
+                              setExemptions(newExs);
+                            }}
+                            required
+                            style={{ flex: 1 }}
+                          />
+                          {exemptions.length > 1 && (
+                            <button
+                              type="button"
+                              className="btn-icon-only delete"
+                              onClick={() => {
+                                setExemptions(exemptions.filter((_, idx) => idx !== index));
+                              }}
+                              title="حذف رقم الإعفاء"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        style={{ alignSelf: 'flex-start', padding: '0.4rem 0.8rem', fontSize: '0.85rem', marginTop: '0.25rem' }}
+                        onClick={() => {
+                          setExemptions([...exemptions, { exemption_number: '', main_item_code: '' }]);
+                        }}
+                      >
+                        <Plus size={14} />
+                        <span>إضافة إعفاء آخر</span>
+                      </button>
                     </div>
-                    <div className="form-group">
-                      <label className="form-label">رمز البند الرئيسي (Main Item Code) *</label>
-                      <input
-                        type="text"
-                        className="form-input"
-                        placeholder="مثال: 73"
-                        value={mainItemCode}
-                        onChange={(e) => setMainItemCode(e.target.value)}
-                        required
-                      />
+
+                    <div className="form-group" style={{ marginTop: '0.5rem' }}>
+                      <label className="form-label" style={{ marginBottom: '0.5rem' }}>الشركات الموردة المرتبطة بهذا الصنف (اختياري)</label>
+                      <div style={{
+                        maxHeight: '180px',
+                        overflowY: 'auto',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: 'var(--radius-md)',
+                        padding: '0.75rem',
+                        background: 'var(--bg-app)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.5rem'
+                      }}>
+                        {companies.length > 0 ? (
+                          companies.map(comp => (
+                            <label key={comp.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.9rem' }}>
+                              <input
+                                type="checkbox"
+                                checked={selectedCompanyIds.includes(comp.id!)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedCompanyIds([...selectedCompanyIds, comp.id!]);
+                                  } else {
+                                    setSelectedCompanyIds(selectedCompanyIds.filter(id => id !== comp.id));
+                                  }
+                                }}
+                                style={{ width: '1rem', height: '1rem', cursor: 'pointer' }}
+                              />
+                              <span>{comp.name_ar}</span>
+                            </label>
+                          ))
+                        ) : (
+                          <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>لا توجد شركات مسجلة للربط بها</span>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}
