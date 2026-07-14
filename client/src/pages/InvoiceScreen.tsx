@@ -10,7 +10,8 @@ import {
 import {
   getCompanies,
   getMaterials,
-  exportToExcel
+  exportToExcel,
+  getReturnedInvoices
 } from '../api';
 import type { Company, Material, InvoiceInput } from '../api';
 import { SearchableSelect } from '../components/SearchableSelect';
@@ -30,6 +31,45 @@ export const InvoiceScreen: React.FC<InvoiceScreenProps> = ({ showToast, navigat
   // In-memory invoice list before export
   const [invoices, setInvoices] = useState<InvoiceInput[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  // New States for Request Save & Return Toggle
+  const [requestName, setRequestName] = useState<string>('');
+  const [includeReturned, setIncludeReturned] = useState<boolean>(false);
+
+  // Fetch returned invoices when toggled
+  useEffect(() => {
+    if (includeReturned) {
+      const fetchReturned = async () => {
+        try {
+          const data = await getReturnedInvoices();
+          if (data.length === 0) {
+            showToast('لا توجد فواتير مسترجعة في قاعدة البيانات حالياً', 'info');
+            setIncludeReturned(false);
+            return;
+          }
+          
+          // Tag them and merge
+          const tagged = data.map(inv => ({
+            ...inv,
+            isReturnedFromDb: true
+          }));
+
+          setInvoices(prev => {
+            const filteredPrev = prev.filter(inv => !(inv as any).isReturnedFromDb);
+            return [...filteredPrev, ...tagged];
+          });
+          showToast(`تم تضمين ${data.length} من الفواتير المسترجعة تلقائياً`, 'success');
+        } catch (err: any) {
+          showToast('خطأ في تحميل الفواتير المسترجعة: ' + err.message, 'error');
+          setIncludeReturned(false);
+        }
+      };
+      fetchReturned();
+    } else {
+      // Remove database-loaded returned invoices
+      setInvoices(prev => prev.filter(inv => !(inv as any).isReturnedFromDb));
+    }
+  }, [includeReturned]);
 
   // Form Fields
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
@@ -255,7 +295,7 @@ export const InvoiceScreen: React.FC<InvoiceScreenProps> = ({ showToast, navigat
     setTotalAmount('');
   };
 
-  // Export to Excel
+  // Export to Excel and save request in database
   const handleExport = async () => {
     if (invoices.length === 0) {
       showToast('الجدول فارغ! الرجاء إضافة فواتير أولاً قبل التصدير', 'warning');
@@ -263,11 +303,16 @@ export const InvoiceScreen: React.FC<InvoiceScreenProps> = ({ showToast, navigat
     }
 
     try {
-      showToast('جاري إنشاء وتصدير ملف الإكسل...', 'info');
-      await exportToExcel(invoices);
-      showToast('تم تصدير الملف بنجاح! تحقق من التنزيلات الخاصة بك', 'success');
+      showToast('جاري إنشاء وتصدير ملف الإكسل وحفظ الطلب في قاعدة البيانات...', 'info');
+      await exportToExcel(invoices, requestName.trim() || undefined);
+      showToast('تم تصدير الملف وحفظ الطلب بنجاح!', 'success');
+      
+      // Reset list and input states
+      setInvoices([]);
+      setRequestName('');
+      setIncludeReturned(false);
     } catch (err: any) {
-      showToast('فشل التصدير: ' + err.message, 'error');
+      showToast('فشل التصدير وحفظ البيانات: ' + err.message, 'error');
     }
   };
 
@@ -490,6 +535,22 @@ export const InvoiceScreen: React.FC<InvoiceScreenProps> = ({ showToast, navigat
 
       {/* 2. In-Memory Table Section */}
       <div className="card" style={{ margin: 0 }}>
+        {/* Toggle Panel for Saved Invoices */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem', background: 'var(--bg-app)', borderRadius: 'var(--radius-md)', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '1rem', border: '1px solid var(--border-color)' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontWeight: 600 }}>
+            <input
+              type="checkbox"
+              checked={includeReturned}
+              onChange={(e) => setIncludeReturned(e.target.checked)}
+              style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+            />
+            <span>تضمين الفواتير المسترجعة من المعاملات السابقة (تلقائياً)</span>
+          </label>
+          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+            * عند التفعيل، سيتم دمج جميع الفواتير التي لم تُعتمد سابقاً في هذا الكشف.
+          </span>
+        </div>
+
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '1rem' }}>
           <div>
             <h3 style={{ fontSize: '1.1rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0 }}>
@@ -505,15 +566,25 @@ export const InvoiceScreen: React.FC<InvoiceScreenProps> = ({ showToast, navigat
             </p>
           </div>
 
-          <button
-            className="btn btn-success"
-            onClick={handleExport}
-            disabled={invoices.length === 0}
-            style={{ opacity: invoices.length === 0 ? 0.65 : 1, cursor: invoices.length === 0 ? 'not-allowed' : 'pointer' }}
-          >
-            <FileSpreadsheet size={18} />
-            <span>تصدير إلى ملف Excel</span>
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <input
+              type="text"
+              placeholder="اسم هذا الطلب (مثال: طلب إعفاء 2026-07)"
+              className="form-input"
+              value={requestName}
+              onChange={(e) => setRequestName(e.target.value)}
+              style={{ maxWidth: '300px', margin: 0 }}
+            />
+            <button
+              className="btn btn-success"
+              onClick={handleExport}
+              disabled={invoices.length === 0}
+              style={{ opacity: invoices.length === 0 ? 0.65 : 1, cursor: invoices.length === 0 ? 'not-allowed' : 'pointer' }}
+            >
+              <FileSpreadsheet size={18} />
+              <span>تصدير وحفظ الطلب</span>
+            </button>
+          </div>
         </div>
 
         {invoices.length > 0 ? (

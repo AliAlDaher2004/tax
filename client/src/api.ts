@@ -139,9 +139,10 @@ export async function deleteMaterial(id: string): Promise<{ success: boolean; me
 // -------------------------------------------------------------
 // Export Excel API
 // -------------------------------------------------------------
-export async function exportToExcel(invoices: InvoiceInput[]): Promise<void> {
+export async function exportToExcel(invoices: InvoiceInput[], requestName?: string): Promise<void> {
   // Map our UI-state invoice entries to the exact format expected by the backend ExcelJS exporter
-  const payload = invoices.map(inv => ({
+  const payloadInvoices = invoices.map(inv => ({
+    id: inv.id, // Pass database ID if it's a resubmitted invoice
     invoiceNumber: inv.invoiceNumber,
     invoiceDate: inv.invoiceDate,
     taxNumber: inv.taxNumber,
@@ -149,13 +150,15 @@ export async function exportToExcel(invoices: InvoiceInput[]): Promise<void> {
     exemptionNumber: inv.exemptionNumber,
     quantity: inv.quantity,
     subtotalAmount: inv.subtotalAmount,
-    totalAmount: inv.totalAmount
+    totalAmount: inv.totalAmount,
+    companyId: inv.companyId,
+    materialId: inv.materialId
   }));
 
   const response = await fetch(`${API_BASE_URL}/export`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
+    body: JSON.stringify({ invoices: payloadInvoices, requestName })
   });
 
   if (!response.ok) {
@@ -168,7 +171,8 @@ export async function exportToExcel(invoices: InvoiceInput[]): Promise<void> {
   const url = window.URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.setAttribute('download', 'Tax_Exemption_Invoices.xlsx');
+  const safeName = requestName ? requestName.replace(/\s+/g, '_') : 'Tax_Exemption_Invoices';
+  link.setAttribute('download', `${safeName}.xlsx`);
   document.body.appendChild(link);
   link.click();
   link.parentNode?.removeChild(link);
@@ -245,6 +249,234 @@ export async function importMaterialsExcel(base64File: string): Promise<ImportRe
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
     throw new Error(errorData.error || 'Failed to import materials');
+  }
+  return response.json();
+}
+
+// -------------------------------------------------------------
+// New Tax Tracking & PDF Upload APIs
+// -------------------------------------------------------------
+
+export interface Invoice {
+  id: string;
+  invoiceNumber: string;
+  invoiceDate: string;
+  taxNumber: string;
+  mainItemCode: string;
+  exemptionNumber: string;
+  quantity: number;
+  subtotalAmount: number;
+  totalAmount: number;
+  status: 'pending' | 'ready' | 'returned' | 'resubmitted';
+  companyId?: string;
+  materialId?: string;
+  companyNameAr?: string;
+}
+
+export interface TaxRequest {
+  id: string;
+  name: string;
+  created_at: string;
+  invoices: Invoice[];
+  stats: {
+    total: number;
+    pending: number;
+    ready: number;
+    returned: number;
+    resubmitted: number;
+  };
+}
+
+export interface PdfDocument {
+  id: string;
+  filename: string;
+  created_at: string;
+}
+
+export async function getRequests(): Promise<TaxRequest[]> {
+  const response = await fetch(`${API_BASE_URL}/requests`);
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || 'Failed to fetch tax requests');
+  }
+  return response.json();
+}
+
+export async function getReturnedInvoices(): Promise<InvoiceInput[]> {
+  const response = await fetch(`${API_BASE_URL}/invoices/returned`);
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || 'Failed to fetch returned invoices');
+  }
+  return response.json();
+}
+
+export async function uploadPdfDocument(
+  filename: string | null,
+  fileData: string | null,
+  invoiceUpdates: { id: string; status: 'ready' | 'returned' }[]
+): Promise<any> {
+  const response = await fetch(`${API_BASE_URL}/pdf-documents/upload`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename, file_data: fileData, invoice_updates: invoiceUpdates })
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || 'Failed to upload tax response PDF');
+  }
+  return response.json();
+}
+
+export async function getPdfDocuments(): Promise<PdfDocument[]> {
+  const response = await fetch(`${API_BASE_URL}/pdf-documents`);
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || 'Failed to fetch PDF documents list');
+  }
+  return response.json();
+}
+
+export async function downloadPdfDocument(id: string, filename: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/pdf-documents/${id}/download`);
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || 'Failed to download PDF file');
+  }
+  const data = await response.json();
+  if (!data || !data.file_data) {
+    throw new Error('PDF file content is empty.');
+  }
+
+  // Convert base64 to blob and download
+  const byteCharacters = atob(data.file_data);
+  const byteNumbers = new Array(byteCharacters.length);
+  for (let i = 0; i < byteCharacters.length; i++) {
+    byteNumbers[i] = byteCharacters.charCodeAt(i);
+  }
+  const byteArray = new Uint8Array(byteNumbers);
+  const blob = new Blob([byteArray], { type: 'application/pdf' });
+
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', filename);
+  document.body.appendChild(link);
+  link.click();
+  link.parentNode?.removeChild(link);
+  window.URL.revokeObjectURL(url);
+}
+
+export async function exportReadyInvoices(requestId: string, requestName: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/requests/${requestId}/export-ready`, {
+    method: 'POST'
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || 'Failed to export ready invoices');
+  }
+
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', `جاهز_${requestName.replace(/\s+/g, '_')}.xlsx`);
+  document.body.appendChild(link);
+  link.click();
+  link.parentNode?.removeChild(link);
+  window.URL.revokeObjectURL(url);
+}
+
+export async function createManualRequest(
+  requestName: string,
+  invoices: any[]
+): Promise<{ success: boolean; message: string }> {
+  const response = await fetch(`${API_BASE_URL}/requests/manual`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requestName, invoices })
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || 'Failed to create manual request');
+  }
+  return response.json();
+}
+
+export async function importInvoicesRequest(
+  base64File: string,
+  requestName: string,
+  defaultStatus: 'pending' | 'ready'
+): Promise<{ success: boolean; message: string }> {
+  const response = await fetch(`${API_BASE_URL}/requests/import`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ file: base64File, requestName, defaultStatus })
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || 'Failed to import invoices request');
+  }
+  return response.json();
+}
+
+export async function updateInvoiceStatus(
+  invoiceId: string,
+  status: 'pending' | 'ready' | 'returned' | 'resubmitted'
+): Promise<{ success: boolean; message: string }> {
+  const response = await fetch(`${API_BASE_URL}/invoices/${invoiceId}/status`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status })
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || 'Failed to update invoice status');
+  }
+  return response.json();
+}
+
+export async function deleteRequest(
+  requestId: string
+): Promise<{ success: boolean; message: string }> {
+  const response = await fetch(`${API_BASE_URL}/requests/${requestId}`, {
+    method: 'DELETE'
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || 'Failed to delete request');
+  }
+  return response.json();
+}
+
+export async function getCompanyInvoices(
+  companyId: string
+): Promise<any[]> {
+  const response = await fetch(`${API_BASE_URL}/companies/${companyId}/invoices`);
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || 'Failed to fetch company invoices');
+  }
+  return response.json();
+}
+
+export async function deleteInvoice(
+  invoiceId: string
+): Promise<{ success: boolean; message: string }> {
+  const response = await fetch(`${API_BASE_URL}/invoices/${invoiceId}`, {
+    method: 'DELETE'
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || 'Failed to delete invoice');
   }
   return response.json();
 }

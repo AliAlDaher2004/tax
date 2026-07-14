@@ -22,7 +22,9 @@ import {
   downloadCompaniesTemplate,
   downloadMaterialsTemplate,
   importCompaniesExcel,
-  importMaterialsExcel
+  importMaterialsExcel,
+  getCompanyInvoices,
+  downloadPdfDocument
 } from '../api';
 import type { Company, Material } from '../api';
 
@@ -37,6 +39,41 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({ showToast }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [importing, setImporting] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
+
+  // Supplier Invoices Modal States
+  const [selectedCompanyForInvoices, setSelectedCompanyForInvoices] = useState<Company | null>(null);
+  const [companyInvoices, setCompanyInvoices] = useState<any[]>([]);
+  const [loadingInvoices, setLoadingInvoices] = useState<boolean>(false);
+  const [isCompanyInvoicesModalOpen, setIsCompanyInvoicesModalOpen] = useState<boolean>(false);
+
+  // Fetch supplier invoices handler
+  const handleCompanyClick = async (company: Company) => {
+    if (!company.id) {
+      showToast('المورد غير صالح (معرّف المورد مفقود)', 'error');
+      return;
+    }
+    setSelectedCompanyForInvoices(company);
+    setIsCompanyInvoicesModalOpen(true);
+    setLoadingInvoices(true);
+    try {
+      const data = await getCompanyInvoices(company.id);
+      setCompanyInvoices(data);
+    } catch (err: any) {
+      showToast('فشل تحميل فواتير المورد: ' + err.message, 'error');
+    } finally {
+      setLoadingInvoices(false);
+    }
+  };
+
+  // Download PDF Handler
+  const handleDownloadInvoicePdf = async (pdfId: string, filename: string) => {
+    try {
+      showToast('جاري تحميل مستند الـ PDF...', 'info');
+      await downloadPdfDocument(pdfId, filename);
+    } catch (err: any) {
+      showToast('فشل تحميل الملف: ' + err.message, 'error');
+    }
+  };
 
   const handleDownloadTemplate = async () => {
     try {
@@ -371,7 +408,27 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({ showToast }) => {
                       <tbody>
                         {filteredCompanies.map((company) => (
                           <tr key={company.id}>
-                            <td style={{ fontWeight: 600 }}>{company.name_ar}</td>
+                            <td>
+                              <button
+                                type="button"
+                                onClick={() => handleCompanyClick(company)}
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  color: 'var(--primary)',
+                                  fontWeight: 700,
+                                  textDecoration: 'underline',
+                                  cursor: 'pointer',
+                                  padding: 0,
+                                  textAlign: 'right',
+                                  fontSize: 'inherit',
+                                  fontFamily: 'inherit'
+                                }}
+                                title="عرض فواتير هذا المورد ومستندات الـ PDF المرتبطة بها"
+                              >
+                                {company.name_ar}
+                              </button>
+                            </td>
                             <td>
                               <code style={{ fontSize: '0.95rem', background: 'var(--bg-app)', padding: '0.2rem 0.4rem', borderRadius: '4px' }}>
                                 {company.tax_number}
@@ -657,6 +714,109 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({ showToast }) => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Supplier Invoices History Modal */}
+      {isCompanyInvoicesModalOpen && selectedCompanyForInvoices && (
+        <div className="modal-overlay" style={{ animation: 'fadeIn 0.2s ease', zIndex: 1000 }}>
+          <div className="modal-content" style={{ maxWidth: '850px', width: '90%' }}>
+            <div className="modal-header">
+              <h3 className="modal-title">سجل فواتير المورد: {selectedCompanyForInvoices.name_ar}</h3>
+              <button className="btn-icon-only" onClick={() => setIsCompanyInvoicesModalOpen(false)}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxHeight: '60vh', overflowY: 'auto' }}>
+              <div style={{ display: 'flex', gap: '2rem', background: 'var(--bg-app)', padding: '1rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', fontSize: '0.9rem' }}>
+                <div><strong>الرقم الضريبي للمورد: </strong><code style={{ fontSize: '1rem' }}>{selectedCompanyForInvoices.tax_number}</code></div>
+              </div>
+
+              {loadingInvoices ? (
+                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '200px', flexDirection: 'column', gap: '1rem' }}>
+                  <div style={{ width: '2rem', height: '2rem', border: '3px solid var(--primary-light)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+                  <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>جاري تحميل سجل الفواتير والمطابقات...</span>
+                </div>
+              ) : companyInvoices.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-muted)', border: '2px dashed var(--border-color)', borderRadius: 'var(--radius-md)' }}>
+                  لا توجد أي فواتير مسجلة لهذا المورد في النظام حالياً.
+                </div>
+              ) : (
+                <div className="table-container" style={{ margin: 0, border: '1px solid var(--border-color)' }}>
+                  <table className="data-table" style={{ fontSize: '0.85rem' }}>
+                    <thead>
+                      <tr>
+                        <th>رقم الفاتورة</th>
+                        <th>تاريخ الفاتورة</th>
+                        <th>الصنف / المادة</th>
+                        <th>بند الإعفاء</th>
+                        <th>المبلغ الإجمالي</th>
+                        <th>الحالة</th>
+                        <th>ملف الرد الضريبي (PDF)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {companyInvoices.map((inv) => (
+                        <tr key={inv.id}>
+                          <td style={{ fontWeight: 700 }}>{inv.invoiceNumber}</td>
+                          <td>{inv.invoiceDate}</td>
+                          <td>{inv.materialName}</td>
+                          <td>
+                            <code style={{ color: 'var(--primary)', fontWeight: 600 }}>
+                              {inv.exemptionNumber ? `620/31/2/${inv.exemptionNumber}` : 'غير متوفر'}
+                            </code>
+                          </td>
+                          <td style={{ fontWeight: 700 }}>{inv.totalAmount.toLocaleString()}</td>
+                          <td>
+                            <span className={`status-badge status-${inv.status}`} style={{ fontSize: '0.75rem', padding: '0.15rem 0.4rem' }}>
+                              {inv.status === 'ready' ? 'جاهزة / معتمدة' : inv.status === 'returned' ? 'مسترجعة' : 'قيد الانتظار'}
+                            </span>
+                          </td>
+                          <td>
+                            {inv.pdfDocument ? (
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadInvoicePdf(inv.pdfDocument.id, inv.pdfDocument.filename)}
+                                className="btn btn-secondary"
+                                style={{
+                                  fontSize: '0.75rem',
+                                  padding: '0.2rem 0.5rem',
+                                  minHeight: 'auto',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.25rem',
+                                  backgroundColor: '#EEF2F6',
+                                  color: 'var(--primary)',
+                                  borderColor: 'var(--primary-light)'
+                                }}
+                                title="تحميل ملف الرد الضريبي المرتبط بهذه الفاتورة"
+                              >
+                                <Download size={12} />
+                                <span>{inv.pdfDocument.filename.substring(0, 15)}...</span>
+                              </button>
+                            ) : (
+                              <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>غير مرفق</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <div className="modal-footer">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setIsCompanyInvoicesModalOpen(false)}
+              >
+                إغلاق النافذة
+              </button>
+            </div>
           </div>
         </div>
       )}

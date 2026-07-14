@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { FileText, Settings, Sparkles } from 'lucide-react';
+import { FileText, Settings, Sparkles, ClipboardList } from 'lucide-react';
 import { InvoiceScreen } from './pages/InvoiceScreen';
 import { AdminScreen } from './pages/AdminScreen';
+import { RequestsScreen } from './pages/RequestsScreen';
 
 interface ToastMessage {
   id: string;
@@ -10,7 +11,7 @@ interface ToastMessage {
 }
 
 function App() {
-  const [activeTab, setActiveTab] = useState<'invoices' | 'admin'>('invoices');
+  const [activeTab, setActiveTab] = useState<'invoices' | 'tracking' | 'admin'>('invoices');
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
   // Show customized toast alert
@@ -54,6 +55,13 @@ function App() {
               <span>إدخال الفواتير</span>
             </button>
             <button
+              className={`nav-button ${activeTab === 'tracking' ? 'active' : ''}`}
+              onClick={() => setActiveTab('tracking')}
+            >
+              <ClipboardList size={18} />
+              <span>متابعة الطلبات والضرائب</span>
+            </button>
+            <button
               className={`nav-button ${activeTab === 'admin' ? 'active' : ''}`}
               onClick={() => setActiveTab('admin')}
             >
@@ -71,6 +79,8 @@ function App() {
             showToast={showToast}
             navigateToAdmin={() => setActiveTab('admin')}
           />
+        ) : activeTab === 'tracking' ? (
+          <RequestsScreen showToast={showToast} />
         ) : (
           <AdminScreen showToast={showToast} />
         )}
